@@ -1,0 +1,154 @@
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+typedef float2 Complex;
+typedef double2 ComplexDouble;
+#define  dataSize  50*1000*1000
+
+cudaError_t ComplexDouble2FloatCuda(ComplexDouble *Input1, ComplexDouble *Input2, Complex *Output1, Complex *Output2, int Len);
+
+__global__ void ComplexDouble2Float(ComplexDouble *Input1, ComplexDouble *Input2, Complex *Output1, Complex *Output2, int Len)
+{
+	const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
+	const int threadNum =  blockDim.x*gridDim.x;
+	
+	for (int i = 0; i < Len; i += threadNum) {
+
+		Output1[i].x = (float)Input1[i].x;
+		Output1[i].y = (float)Input1[i].y;
+		Output2[i].x = (float)Input2[i].x;
+		Output2[i].y = (float)Input2[i].y;
+	}
+}
+
+int main()
+{
+	ComplexDouble *input1 = (ComplexDouble*)malloc(sizeof(ComplexDouble)*dataSize);
+	ComplexDouble *input2 = (ComplexDouble*)malloc(sizeof(ComplexDouble)*dataSize);
+	Complex *output1 = (Complex*)malloc(sizeof(Complex)*dataSize);
+	Complex *output2 = (Complex*)malloc(sizeof(Complex)*dataSize);
+	
+	srand((unsigned int)time(NULL));
+
+	for(int i=0;i<dataSize;i++){
+	
+		input1[i].x = (double)(rand() % 10); // 假设生成0到9之间的随机数
+		input1[i].y = (double)(rand() % 10);
+		input2[i].x = (double)(rand() % 10);
+		input2[i].y = (double)(rand() % 10);
+	}
+
+    // Add vectors in parallel.
+    cudaError_t cudaStatus = ComplexDouble2FloatCuda(input1, input2, output1, output2, dataSize);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "addWithCuda failed!");
+        return 1;
+    }
+
+    printf("successed!\n");
+
+    // cudaDeviceReset must be called before exiting in order for profiling and
+    // tracing tools such as Nsight and Visual Profiler to show complete traces.
+    cudaStatus = cudaDeviceReset();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceReset failed!");
+        return 1;
+    }
+
+    return 0;
+}
+
+// Helper function for using CUDA to add vectors in parallel.
+cudaError_t ComplexDouble2FloatCuda(ComplexDouble *Input1, ComplexDouble *Input2, Complex *Output1, Complex *Output2, int Len)
+{
+	ComplexDouble *dev_input1 = 0;
+	ComplexDouble *dev_input2 = 0;
+	Complex *dev_output1 = 0;
+	Complex *dev_output2 = 0;
+    cudaError_t cudaStatus;
+
+    // Choose which GPU to run on, change this on a multi-GPU system.
+    cudaStatus = cudaSetDevice(0);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+        goto Error;
+    }
+
+    // Allocate GPU buffers for three vectors (two input, one output)    .
+    cudaStatus = cudaMalloc((void**)&dev_input1, dataSize * sizeof(ComplexDouble));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Error;
+    }
+
+    cudaStatus = cudaMalloc((void**)&dev_input2, dataSize * sizeof(ComplexDouble));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Error;
+    }
+
+    cudaStatus = cudaMalloc((void**)&dev_output1, dataSize * sizeof(Complex));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Error;
+    }
+
+	cudaStatus = cudaMalloc((void**)&dev_output2, dataSize * sizeof(Complex));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMalloc failed!");
+		goto Error;
+	}
+    // Copy input vectors from host memory to GPU buffers.
+    cudaStatus = cudaMemcpy(dev_input1, Input1, dataSize * sizeof(ComplexDouble), cudaMemcpyHostToDevice);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!");
+        goto Error;
+    }
+
+	cudaStatus = cudaMemcpy(dev_input2, Input2, dataSize * sizeof(ComplexDouble), cudaMemcpyHostToDevice);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Error;
+	}
+
+    // Launch a kernel on the GPU with one thread for each element.
+	ComplexDouble2Float <<<1024, 786>>>(dev_input1, dev_input2, dev_output1, dev_output2, dataSize);
+
+    // Check for any errors launching the kernel
+    cudaStatus = cudaGetLastError();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+        goto Error;
+    }
+    
+    // cudaDeviceSynchronize waits for the kernel to finish, and returns
+    // any errors encountered during the launch.
+    cudaStatus = cudaDeviceSynchronize();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+        goto Error;
+    }
+
+    // Copy output vector from GPU buffer to host memory.
+    cudaStatus = cudaMemcpy(Output1, dev_output1, dataSize * sizeof(Complex), cudaMemcpyDeviceToHost);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!");
+        goto Error;
+    }
+
+
+	cudaStatus = cudaMemcpy(Output2, dev_output2, dataSize * sizeof(Complex), cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Error;
+	}
+Error:
+    cudaFree(dev_input1);
+    cudaFree(dev_input2);
+    cudaFree(dev_output1);
+	  cudaFree(dev_output2);
+    
+    return cudaStatus;
+}
