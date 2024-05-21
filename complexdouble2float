@@ -40,7 +40,7 @@ int main()
 		input2[i].y = (double)(rand() % 10);
 	}
 
-    // Add vectors in parallel.
+   
     cudaError_t cudaStatus = ComplexDouble2FloatCuda(input1, input2, output1, output2, dataSize);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "addWithCuda failed!");
@@ -60,7 +60,7 @@ int main()
     return 0;
 }
 
-// Helper function for using CUDA to add vectors in parallel.
+ 
 cudaError_t ComplexDouble2FloatCuda(ComplexDouble *Input1, ComplexDouble *Input2, Complex *Output1, Complex *Output2, int Len)
 {
 	ComplexDouble *dev_input1 = 0;
@@ -76,7 +76,7 @@ cudaError_t ComplexDouble2FloatCuda(ComplexDouble *Input1, ComplexDouble *Input2
         goto Error;
     }
 
-    // Allocate GPU buffers for three vectors (two input, one output)    .
+    
     cudaStatus = cudaMalloc((void**)&dev_input1, dataSize * sizeof(ComplexDouble));
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
@@ -113,7 +113,7 @@ cudaError_t ComplexDouble2FloatCuda(ComplexDouble *Input1, ComplexDouble *Input2
 		goto Error;
 	}
 
-    // Launch a kernel on the GPU with one thread for each element.
+    // Launch a kernel  
 	ComplexDouble2Float <<<1024, 786>>>(dev_input1, dev_input2, dev_output1, dev_output2, dataSize);
 
     // Check for any errors launching the kernel
