@@ -84,7 +84,7 @@ int main()
 	return 0;
 }
 
-// Helper function for using CUDA to add vectors in parallel.
+// Helper function for using CUDA  
 cudaError_t ReductionSumCuda(float *Input, float *Output, int  SectionLen,int SectionNum)
 {
 	float *dev_input = 0;
@@ -98,7 +98,7 @@ cudaError_t ReductionSumCuda(float *Input, float *Output, int  SectionLen,int Se
 		goto Error;
 	}
 
-	// Allocate GPU buffers for three vectors (two input, one output)    .
+ 
 	cudaStatus = cudaMalloc((void**)&dev_input, dataSize * sizeof(float));
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc failed!");
@@ -121,7 +121,7 @@ cudaError_t ReductionSumCuda(float *Input, float *Output, int  SectionLen,int Se
 		goto Error;
 	}
 
-	// Launch a kernel on the GPU with one thread for each element.
+	// Launch a kernel on the GPU  
 	ReductionSum << <SectionNum, 1024 >> > (dev_input,  dev_output, SectionLen, SectionNum);
 
 	// Check for any errors launching the kernel
