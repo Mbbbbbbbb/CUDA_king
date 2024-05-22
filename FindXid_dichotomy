@@ -1,0 +1,196 @@
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+ 
+#define  dataSize  50*1000*1000
+
+cudaError_t FindXid_dichotomyCuda(double *inputXi, double*inputSourceArray, int *outputXid, int Len, int GroupNum, int NumPerGroup, int XiLen);
+
+__global__ void FindXid_dichotomy(double *Xi, double*SourceArray, int *Xid, int Len, int GroupNum, int NumPerGroup, int XiLen)
+{
+	const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (threadID < GroupNum)
+	{
+		int LowIndex = 0;
+		int HighIndex = Len - 1;
+		int MidIndex = ceil((double)(LowIndex + HighIndex) / 2);
+		int bias = 0;
+
+		while ((HighIndex - LowIndex) > 1)
+		{
+			if (Xi[threadID*NumPerGroup] < SourceArray[MidIndex])
+			{
+				HighIndex = MidIndex;
+				MidIndex = ceil((double)(LowIndex + HighIndex) / 2);
+			}
+			else
+			{
+				LowIndex = MidIndex;
+				MidIndex = ceil((double)(LowIndex + HighIndex) / 2);
+			}
+		}
+		Xid[threadID*NumPerGroup] = LowIndex;
+		for (int i = 0; i < NumPerGroup; i++)
+		{
+			if ((NumPerGroup * threadID + i) >= XiLen)
+			{
+				break;
+			}
+			if ((Xi[NumPerGroup * threadID + i] >= SourceArray[LowIndex + bias]) && (Xi[NumPerGroup * threadID + i] < SourceArray[LowIndex + bias + 1]))
+			{
+				Xid[NumPerGroup * threadID + i] = LowIndex + bias;
+			}
+			else
+			{
+				while (1)
+				{
+					if (Xi[NumPerGroup * threadID + i] > SourceArray[LowIndex + bias])
+					{
+						bias++;
+					}
+					else if (Xi[NumPerGroup * threadID + i] < SourceArray[LowIndex + bias])
+					{
+						bias--;
+					}
+
+					if ((Xi[NumPerGroup * threadID + i] >= SourceArray[LowIndex + bias]) && (Xi[NumPerGroup * threadID + i] < SourceArray[LowIndex + bias + 1]))
+					{
+						Xid[NumPerGroup * threadID + i] = LowIndex + bias;
+						break;
+					}
+				}
+			}
+
+		}
+
+
+	}
+
+}
+
+int main()
+{
+	int numPerGroup=896;
+	int groupNum=ceil(dataSize/numPerGroup);
+	int xiLen=25*1000*1000;
+	int  *outputXid = (int*)malloc(sizeof(int)*xiLen);
+	double *inputSourceXi = (double*)malloc(sizeof(double)*xiLen);
+	double *inputSourceArray = (double*)malloc(sizeof(double)*dataSize);
+
+	for (int loop = 0; loop < dataSize; loop++) {
+		
+		inputSourceArray[loop] = (double)loop;
+	}
+	for (int loop = 0; loop < xiLen; loop++) {
+
+		inputSourceXi[loop] = (double)(2*loop) ;
+		
+	}
+
+
+    cudaError_t cudaStatus = FindXid_dichotomyCuda(inputSourceXi, inputSourceArray, outputXid, dataSize, groupNum, numPerGroup, xiLen);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "FindXid_dichotomyCuda failed!");
+        return 1;
+    }
+
+	printf("successed!");
+    // cudaDeviceReset must be called before exiting in order for profiling and
+    // tracing tools such as Nsight and Visual Profiler to show complete traces.
+    cudaStatus = cudaDeviceReset();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceReset failed!");
+        return 1;
+    }
+
+    return 0;
+}
+
+// Helper function for using CUDA  
+cudaError_t FindXid_dichotomyCuda(double *inputXi, double*inputSourceArray, int *outputXid, int Len, int GroupNum, int NumPerGroup, int XiLen)
+{
+	double *devInput_Xi;
+	double*devInput_SourceArray;
+	int *devOutput_Xid;
+
+
+    cudaError_t cudaStatus;
+
+    // Choose which GPU to run on, change this on a multi-GPU system.
+    cudaStatus = cudaSetDevice(0);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+        goto Error;
+    }
+
+    // Allocate GPU buffers  
+    cudaStatus = cudaMalloc((void**)&devInput_Xi, (Len/2) * sizeof(double));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Error;
+    }
+
+    cudaStatus = cudaMalloc((void**)&devInput_SourceArray, Len * sizeof(double));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Error;
+    }
+
+    cudaStatus = cudaMalloc((void**)&devOutput_Xid, Len * sizeof(int));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Error;
+    }
+
+    // Copy input vectors from host memory to GPU buffers.
+    cudaStatus = cudaMemcpy(devInput_Xi, inputXi, (Len / 2) * sizeof(double), cudaMemcpyHostToDevice);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!");
+        goto Error;
+    }
+
+    cudaStatus = cudaMemcpy(devInput_SourceArray, inputSourceArray, Len * sizeof(double), cudaMemcpyHostToDevice);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!");
+        goto Error;
+    }
+
+    // Launch a kernel 
+	FindXid_dichotomy <<<GroupNum/1024+1, 1024>>>(devInput_Xi, devInput_SourceArray, devOutput_Xid, Len,GroupNum, NumPerGroup,XiLen);
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "Kernel launched failed!");
+		goto Error;
+	}
+    // Check for any errors launching the kernel
+    cudaStatus = cudaGetLastError();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+        goto Error;
+    }
+    
+    // cudaDeviceSynchronize waits for the kernel to finish, and returns
+    // any errors encountered during the launch.
+    cudaStatus = cudaDeviceSynchronize();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+        goto Error;
+    }
+
+    // Copy output vector from GPU buffer to host memory.
+    cudaStatus = cudaMemcpy(outputXid, devOutput_Xid, (Len / 2) * sizeof(int), cudaMemcpyDeviceToHost);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!");
+        goto Error;
+    }
+
+ Error:
+    cudaFree(devInput_Xi);
+    cudaFree(devInput_SourceArray);
+    cudaFree(devOutput_Xid);
+    
+    return cudaStatus;
+}
